@@ -65,10 +65,69 @@ class Viewer(object):
     def main_loop(self):
         glutMainLoop()
 
+    def render(self):
+        """Render pass for the scene"""
+        glEnable(GL_LIGHTING)
+        glClear(GL_COLOUR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        # Load the modelview matrix from the current state of the trackball
+        glMatrixMode(GL_MODELVIEW)
+        glPushMatrix()
+        glLoadIdentity()
+        loc = self.interaction.get_location()
+        glTranslated(loc[0], loc[1], loc[2])
+        glMultMatrixf(self.interaction.trackball.matrix)
+        # store the inverse of the current modelview.
+        currentModelView = numpy.array(glGetFloatv(GL_MODELVIEW_MATRIX))
+        self.modelView = numpy.transpose(currentModelView)
+        self.inverseModelView = inv(numpy.transpose(currentModelView))
+
+        # render the scene. This will call the render function for each object
+        # in the scene
+        self.scene.render()
+        #draw the grid
+        glDisable(GL_LIGHTING)
+        glCallList(G_OBJ_PLANE)
+        glPopMatrix()
+        # flush the buffers so that the scene can be drawn
+        glFlush()
+    def init_view(self):
+        """ initialize the projection matrix """
+        xSize, ySize = glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT)
+        aspect_ratio = float(xSize) / float(ySize)
+
+        # load the projection matrix. Always the same
+        glMatrixMode(GL_PROJECTION)
+        glLoadIdentity()
+
+        glViewport(0, 0, xSize, ySize)
+        gluPerspective(70, aspect_ratio, 0.1, 1000.0)
+        glTranslated(0, 0, -15)
+
+
+
+
+        
 if __name__ == "__main__":
     viewer = Viewer()
-    viewer.main_loop()
+    viewer.main_loop()]
+class Scene(object):
+        # the default depth from the camera to place an object at
+        PLACE_DEPTH = 15.0
+        def __init__(self):
+            self.node_list = list()
+            # Keep track of the currently selected node.
+            # Actions may depend on whether or not something is selected
+            self.selected_node = None
+            def add_node(self, node):
+        """ Add a new node to the scene """
+        self.node_list.append(node)
 
+    def render(self):
+        """ Render the scene. """
+        for node in self.node_list:
+            node.render()
+
+   
 
 
 
