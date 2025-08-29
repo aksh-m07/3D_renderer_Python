@@ -119,15 +119,76 @@ class Scene(object):
             # Actions may depend on whether or not something is selected
             self.selected_node = None
             def add_node(self, node):
-        """ Add a new node to the scene """
-        self.node_list.append(node)
+                """ Add a new node to the scene """
+                self.node_list.append(node)
+
+        def render(self):
+            """ Render the scene. """
+            for node in self.node_list:
+                node.render()
+class Node(object):
+    """Base class for scene elements"""
+    def __init__(self):
+        self.color_index = random.randint(color.MIN_COLOR, color.MAX_COLOR)
+        self.aabb= AABB([0.0, 0.0, 0.0], [0.5, 0.5, 0.5])
+        self.translation_matrix=numpy.identity(4)
+        self.scaling_matrix=numpy.identity(4)
+        self.selected = False
 
     def render(self):
-        """ Render the scene. """
-        for node in self.node_list:
-            node.render()
+        """Render the item to the screen"""
+        glPushMatrix()
+        glMultMatrixf(self.transpose(self.translation_matrix))
+        glMultMatrixf(self.scaling_matrix)
+        cur_color=color.COLORS[self.color_index]
+        glColor3f(cur_color[0], cur_color[1], cur_color[2])
+        glColor3f(cur_color[0], cur_color[1], cur_color[2])
+        if self.selected:  # emit light if the node is selected
+            glMaterialfv(GL_FRONT, GL_EMISSION, [0.3, 0.3, 0.3])
 
+        self.render_self()
+
+        if self.selected:
+            glMaterialfv(GL_FRONT, GL_EMISSION, [0.0, 0.0, 0.0])
+        glPopMatrix()
+class Primitive(Node):
+    def __init__(self):
+        super(Primitive, self).__init__()
+    def render_self(self):
+        glCallList(self.call_list)
+class Sphere(Primitive):
+    """Sphere primitive"""
+    def __init__(self):
+        super(Sphere, self).__init__()
+        self.call_list=G_OBJ_SPHERE
+
+class Cube(Primitive):
+    """ Cube primitive """
+    def __init__(self):
+        super(Cube, self).__init__()
+        self.call_list = G_OBJ_CUBE   
+
+class HierarchicalNode(Node):
+    def __init__(self):
+        super(HierarchicalNode, self).__init__()
+        self.child_nodes = []
+
+    def render_self(self):
+        for child in self.child_nodes:
+            child.render()
+class SnowFigure(HierarchicalNode):
+    def __init__(self):
+        super(SnowFigure, self).__init__()
+        self.child_nodes = [Sphere(), Sphere(), Sphere()]
+        self.child_nodes[0].translate(0, -0.6, 0) # scale 1.0
+        self.child_nodes[1].translate(0, 0.1, 0)
+        self.child_nodes[1].scaling_matrix = numpy.dot(
+            self.scaling_matrix, scaling([0.8, 0.8, 0.8]))
+        self.child_nodes[2].translate(0, 0.75, 0)
+        self.child_nodes[2].scaling_matrix = numpy.dot(
+            self.scaling_matrix, scaling([0.7, 0.7, 0.7]))
    
+
 
 
 
