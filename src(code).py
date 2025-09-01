@@ -1,6 +1,12 @@
 from OpenGL.GLUT import *
 from OpenGL.GL import *
 import numpy
+import sys
+import random
+from collections import defaultdict
+import color  # Custom color module
+import trackball  # Custom trackball module
+import AABB  # Custom AABB module
 
 class Viewer(object):
     def __init__(self):
@@ -102,6 +108,52 @@ class Viewer(object):
         glViewport(0, 0, xSize, ySize)
         gluPerspective(70, aspect_ratio, 0.1, 1000.0)
         glTranslated(0, 0, -15)
+    
+    def get_ray(self, x, y):
+        """ 
+        Generate a ray beginning at the near plane, in the direction that
+        the x, y coordinates are facing 
+
+        Consumes: x, y coordinates of mouse on screen 
+        Return: start, direction of the ray 
+        """
+        self.init_view()
+
+        glMatrixMode(GL_MODELVIEW)
+        glLoadIdentity()
+        # get two points on the line.
+        start=numpy.array(gluUnProject(x,y,0.001))
+        end=numpy.array(gluUnProject(x,y,0.999))
+
+        # convert those points into a ray
+        direction = end - start
+        direction = direction / numpy.linalg.norm(direction)
+        return (start, direction)
+
+    def pick(self, x, y):
+        """ Execute pick of an object. Selects an object in the scene. """
+        start, direction = self.get_ray(x, y)
+        self.scene.pick(start, direction, self.modelView)
+
+    def move(self, x, y):
+        """ Execute a move command on the scene. """
+        start, direction = self.get_ray(x, y)
+        self.scene.move_selected(start, direction, self.inverseModelView)
+    def rotate_color(self, forward):
+        """ 
+        Rotate the color of the selected Node. 
+        Boolean 'forward' indicates direction of rotation. 
+        """
+        self.scene.rotate_selected_color(forward)     
+    def scale(self, up):
+        """ Scale the selected Node. Boolean up indicates scaling larger."""
+        self.scene.scale_selected(up)
+    def place(self, shape, x, y):
+        """ Execute a placement of a new primitive into the scene. """
+        start, direction = self.get_ray(x, y)
+        self.scene.place(shape, start, direction, self.inverseModelView)
+
+
 
 
 
@@ -126,6 +178,109 @@ class Scene(object):
             """ Render the scene. """
             for node in self.node_list:
                 node.render()
+        def pick(self, start, direction, mat):
+            """ 
+        Execute selection.
+            
+        start, direction describe a Ray. 
+        mat is the inverse of the current modelview matrix for the scene.
+        """
+        if self.selected_node is not None:
+            self.selected_node.select(False)
+            self.selected_node = None
+        # Keep track of the closest hit.
+        mindist=sys.maxint
+        closest_node=None
+        for node in self.node_list:
+            hit, distance = node.pick(start, direction, mat)
+            if hit and distance < mindist:
+                mindist, closest_node = distance, node
+
+        # If we hit something, keep track of it.
+        if closest_node is not None:
+            closest_node.select()
+            closest_node.depth = mindist
+            closest_node.selected_loc = start + direction * mindist
+            self.selected_node = closest_node
+        """ 
+        Return whether or not the ray hits the object
+
+        Consume:  
+        start, direction form the ray to check
+        mat is the modelview matrix to transform the ray by 
+        """
+        newmat=numpy.dot(numpy.dot(mat, self.translation_matrix),numpy.linalg.inv(self.scaling_matrix))
+        # transform the modelview matrix by the current translation
+        def select(self, select=None):
+            """ Toggles or sets selected state """
+            if select is not None:
+              self.selected = select
+            else:
+              self.selected = not self.selected
+        def rotate_selected_color(self, forwards):
+            """ Rotate the color of the currently selected node """
+            if self.selected_node is None: return
+            self.selected_node.rotate_color(forwards)
+        def scale_selected(self, up):
+            """ Scale the current selection """
+            if self.selected_node is None: return
+            self.selected_node.scale(up)
+        def move_selected(self, start, direction, inv_modelview):
+            """ 
+            Move the selected node, if there is one.
+                
+            Consume: 
+            start, direction describes the Ray to move to
+            mat is the modelview matrix for the scene 
+            """
+            if self.selected_node is None: return
+
+            # Find the current depth and location of the selected node
+            node = self.selected_node
+            depth = node.depth
+            oldloc = node.selected_loc
+
+            # The new location of the node is the same depth along the new ray
+            newloc = (start + direction * depth)
+
+            # transform the translation with the modelview matrix
+            translation = newloc - oldloc
+            pre_tran = numpy.array([translation[0], translation[1], translation[2], 0])
+            translation = inv_modelview.dot(pre_tran)
+
+            # translate the node and track its location
+            node.translate(translation[0], translation[1], translation[2])
+            node.selected_loc = newloc
+       
+        # class Scene
+        def place(self, shape, start, direction, inv_modelview):
+            """ 
+            Place a new node.
+                
+            Consume:  
+            shape the shape to add
+            start, direction describes the Ray to move to
+            inv_modelview is the inverse modelview matrix for the scene 
+            """
+            new_node = None
+            if shape == 'sphere': new_node = Sphere()
+            elif shape == 'cube': new_node = Cube()
+            elif shape == 'figure': new_node = SnowFigure()
+
+            self.add_node(new_node)
+
+            # place the node at the cursor in camera-space
+            translation = (start + direction * self.PLACE_DEPTH)
+
+            # convert the translation to world-space
+            pre_tran = numpy.array([translation[0], translation[1], translation[2], 1])
+            translation = inv_modelview.dot(pre_tran)
+
+            new_node.translate(translation[0], translation[1], translation[2])
+
+
+
+
 class Node(object):
     """Base class for scene elements"""
     def __init__(self):
@@ -151,6 +306,37 @@ class Node(object):
         if self.selected:
             glMaterialfv(GL_FRONT, GL_EMISSION, [0.0, 0.0, 0.0])
         glPopMatrix()
+    def rotate_color(self, forwards):
+        self.color_index += 1 if forwards else -1
+        if self.color_index > color.MAX_COLOR:
+            self.color_index = color.MIN_COLOR
+        if self.color_index < color.MIN_COLOR:
+            self.color_index = color.MAX_COLOR
+
+    def scale(self, up):
+        s =  1.1 if up else 0.9
+        self.scaling_matrix = numpy.dot(self.scaling_matrix, scaling([s, s, s]))
+        self.aabb.scale(s)
+
+    def scaling(scale):
+        s = numpy.identity(4)
+        s[0, 0] = scale[0]
+        s[1, 1] = scale[1]
+        s[2, 2] = scale[2]
+        s[3, 3] = 1
+    return s
+    def translate(self, x, y, z):
+        self.translation_matrix = numpy.dot(
+            self.translation_matrix, 
+            translation([x, y, z]))
+    def translation(displacement):
+        t = numpy.identity(4)
+        t[0, 3] = displacement[0]
+        t[1, 3] = displacement[1]
+        t[2, 3] = displacement[2]
+        return t
+
+
 class Primitive(Node):
     def __init__(self):
         super(Primitive, self).__init__()
@@ -258,13 +444,15 @@ class Interaction(object):
             glutPostRedisplay()
         self.mouse_loc = (x, y)
     def handle_keystroke(self, key, x, y):
-         """ Called on keyboard input from the user """
+        """ Called on keyboard input from the user """
         xSize, ySize = glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT)
         y = ySize - screen_y
         if key == 's':
             self.trigger('place', 'sphere', x, y)
         elif key == 'c':
             self.trigger('place', 'cube', x, y)
+        elif key == 'f':
+            self.trigger('place', 'figure', x, y)
         elif key == GLUT_KEY_UP:
             self.trigger('scale', up=True)
         elif key == GLUT_KEY_DOWN:
@@ -279,9 +467,3 @@ class Interaction(object):
     def trigger(self, name, *args, **kwargs):
         for func in self.callbacks[name]:
             func(*args, **kwargs)
-
-
-
-
-
-
