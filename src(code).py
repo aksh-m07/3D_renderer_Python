@@ -324,7 +324,7 @@ class Node(object):
         s[1, 1] = scale[1]
         s[2, 2] = scale[2]
         s[3, 3] = 1
-    return s
+        return s
     def translate(self, x, y, z):
         self.translation_matrix = numpy.dot(
             self.translation_matrix, 
